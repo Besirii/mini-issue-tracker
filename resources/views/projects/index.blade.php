@@ -34,7 +34,7 @@
                                 <span class="badge text-bg-light">{{ $project->issues_count }} issues</span>
                             </div>
                             <p class="text-muted small mb-2">
-                                {{ \Illuminate\Support\Str::limit($project->description, 90) ?: 'No description.' }}
+                                {{ $project->description ? \Illuminate\Support\Str::limit($project->description, 90) : 'No description.' }}
                             </p>
                             <div class="small text-muted">
                                 @if ($project->deadline)

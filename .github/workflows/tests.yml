@@ -50,7 +50,9 @@ jobs:
         run: php artisan key:generate
 
       - name: Execute tests
-        run: php artisan test --log-junit junit.xml
+        run: |
+          set -o pipefail
+          php artisan test --log-junit junit.xml 2>&1 | tee test-output.txt
 
       - name: Annotate failed tests
         if: failure()
@@ -59,8 +61,10 @@ jobs:
           import xml.etree.ElementTree as ET
           try:
               root = ET.parse("junit.xml").getroot()
-          except Exception as e:
-              print(f"::error title=No JUnit report::{e}")
+          except Exception:
+              tail = open("test-output.txt", errors="replace").read()[-3500:]
+              tail = tail.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print(f"::error title=Test run crashed::{tail}")
               raise SystemExit
           for case in root.iter("testcase"):
               for problem in list(case.findall("failure")) + list(case.findall("error")):

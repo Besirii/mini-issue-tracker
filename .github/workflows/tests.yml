@@ -50,7 +50,24 @@ jobs:
         run: php artisan key:generate
 
       - name: Execute tests
-        run: php artisan test
+        run: php artisan test --log-junit junit.xml
+
+      - name: Annotate failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          try:
+              root = ET.parse("junit.xml").getroot()
+          except Exception as e:
+              print(f"::error title=No JUnit report::{e}")
+              raise SystemExit
+          for case in root.iter("testcase"):
+              for problem in list(case.findall("failure")) + list(case.findall("error")):
+                  text = (problem.text or problem.get("message") or "")[:3000]
+                  text = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                  print(f"::error title={case.get('class')}::{case.get('name')}%0A{text}")
+          PY
 
   docker:
     name: Docker build + smoke test

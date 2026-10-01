@@ -62,4 +62,7 @@ Route::get('tags', [TagController::class, 'index'])->name('tags.index');
 
 // Comments (load + add via AJAX). Adding a comment is open (uses author_name).
 Route::get('issues/{issue}/comments', [CommentController::class, 'index'])->name('issues.comments.index');
-Route::post('issues/{issue}/comments', [CommentController::class, 'store'])->name('issues.comments.store');
+// Public endpoint, so it is rate-limited: max 10 comments per minute per client.
+Route::post('issues/{issue}/comments', [CommentController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('issues.comments.store');

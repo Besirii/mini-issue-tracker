@@ -93,13 +93,22 @@ jobs:
 
       - name: Build app and web images
         run: |
-          docker build --target app -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
-          docker build --target web -t "$IMAGE-web:${{ github.sha }}" -t "$IMAGE-web:latest" .
+          set -o pipefail
+          {
+            docker build --progress=plain --target app -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" . &&
+            docker build --progress=plain --target web -t "$IMAGE-web:${{ github.sha }}" -t "$IMAGE-web:latest" .
+          } 2>&1 | tee build.log
+
+      - name: Annotate build failure
+        if: failure()
+        run: |
+          tail -c 3500 build.log | python3 -c "import sys; t=sys.stdin.read().replace('%','%25').replace('\r','').replace('\n','%0A'); print('::error title=Docker build failed::'+t)"
+
+      - name: Create app key for the test stack
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32)" > .env
 
       - name: Start the stack
-        run: |
-          echo "APP_KEY=base64:$(openssl rand -base64 32)" > .env
-          docker compose up -d --build
+        run: docker compose up -d --build
 
       - name: Smoke test
         run: |

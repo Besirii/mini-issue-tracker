@@ -8,14 +8,17 @@ WORKDIR /app
 # Copy only the dependency manifests first so this layer stays cached
 # until composer.json / composer.lock actually change.
 COPY composer.json composer.lock* ./
-RUN composer install \
+# Resolve packages for the PHP version of the runtime image (8.3), not for
+# the newer PHP that ships inside the composer image.
+RUN composer config platform.php 8.3.0 \
+    && composer install \
     --no-dev \
     --no-scripts \
     --no-autoloader \
     --no-interaction \
     --no-progress \
     --prefer-dist \
-    --ignore-platform-reqs
+    --ignore-platform-req=ext-*
 
 # ---------------------------------------------------------------------------
 # Stage 2: application image (PHP-FPM)
@@ -27,8 +30,8 @@ RUN docker-php-ext-install opcache \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
-COPY --from=vendor /app/vendor ./vendor
 COPY . .
+COPY --from=vendor /app/vendor ./vendor
 
 RUN composer dump-autoload --optimize --no-dev \
     && mkdir -p /data storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \

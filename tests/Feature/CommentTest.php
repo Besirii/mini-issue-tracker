@@ -55,4 +55,17 @@ class CommentTest extends TestCase
                 'total' => 7,
             ]);
     }
+
+    public function test_adding_comments_is_rate_limited(): void
+    {
+        $issue = Issue::factory()->create();
+        $payload = ['author_name' => 'Spammer', 'body' => 'Spam'];
+
+        for ($i = 0; $i < 10; $i++) {
+            $this->postJson(route('issues.comments.store', $issue), $payload)->assertCreated();
+        }
+
+        $this->postJson(route('issues.comments.store', $issue), $payload)
+            ->assertStatus(429);
+    }
 }

@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+      target: app
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8080
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /data/database.sqlite
+      LOG_CHANNEL: stderr
+    volumes:
+      - db-data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  db-data:

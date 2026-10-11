@@ -1,16 +1,20 @@
-name: Tests
+name: CI
 
 on:
   push:
     branches:
-      - master
-      - '*.x'
+      - main
   pull_request:
   schedule:
+    # Nightly run catches dependencies that break without any code change.
     - cron: '0 0 * * *'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
@@ -21,7 +25,7 @@ jobs:
       matrix:
         php: [8.3, 8.4, 8.5]
 
-    name: PHP ${{ matrix.php }}
+    name: Tests (PHP ${{ matrix.php }})
 
     steps:
       - name: Checkout code
@@ -46,4 +50,87 @@ jobs:
         run: php artisan key:generate
 
       - name: Execute tests
-        run: php artisan test
+        run: |
+          set -o pipefail
+          php artisan test --log-junit junit.xml 2>&1 | tee test-output.txt
+
+      - name: Annotate failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          try:
+              root = ET.parse("junit.xml").getroot()
+          except Exception:
+              tail = open("test-output.txt", errors="replace").read()[-3500:]
+              tail = tail.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print(f"::error title=Test run crashed::{tail}")
+              raise SystemExit
+          for case in root.iter("testcase"):
+              for problem in list(case.findall("failure")) + list(case.findall("error")):
+                  text = (problem.text or problem.get("message") or "")[:3000]
+                  text = text.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+                  print(f"::error title={case.get('class')}::{case.get('name')}%0A{text}")
+          PY
+
+  docker:
+    name: Docker build + smoke test
+    needs: tests
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/mini-issue-tracker" >> "$GITHUB_ENV"
+
+      - name: Build app and web images
+        run: |
+          set -o pipefail
+          {
+            docker build --progress=plain --target app -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" . &&
+            docker build --progress=plain --target web -t "$IMAGE-web:${{ github.sha }}" -t "$IMAGE-web:latest" .
+          } 2>&1 | tee build.log
+
+      - name: Annotate build failure
+        if: failure()
+        run: |
+          tail -c 3500 build.log | python3 -c "import sys; t=sys.stdin.read().replace('%','%25').replace('\r','').replace('\n','%0A'); print('::error title=Docker build failed::'+t)"
+
+      - name: Create app key for the test stack
+        run: echo "APP_KEY=base64:$(openssl rand -base64 32)" > .env
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8080/up > /dev/null && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/up > /dev/null
+          curl -fsS http://localhost:8080/projects > /dev/null
+          echo "Stack is healthy"
+
+      - name: Show logs
+        if: always()
+        run: docker compose logs
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+      - name: Push images to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push --all-tags "$IMAGE"
+          docker push --all-tags "$IMAGE-web"

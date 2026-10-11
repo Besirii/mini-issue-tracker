@@ -93,6 +93,52 @@ comment flow (create + validation + pagination), and AJAX tag attach/detach.
 
 ---
 
+## Run with Docker
+
+The app ships as two containers: **`app`** (PHP-FPM, runs as a non-root user)
+and **`web`** (Nginx, serves static files and forwards PHP requests to `app`).
+The SQLite database lives on a named volume, so data survives restarts.
+
+```bash
+# 1. Create an app key (once)
+echo "APP_KEY=base64:$(openssl rand -base64 32)" > .env
+
+# 2. Build and start
+docker compose up -d --build
+
+# 3. Open http://localhost:8080  (health check: http://localhost:8080/up)
+
+# Logs / stop
+docker compose logs -f
+docker compose down        # add -v to also delete the database volume
+```
+
+On startup the entrypoint (`docker/entrypoint.sh`) runs migrations and caches
+the config and views. Logs go to stderr, so `docker compose logs` shows them.
+
+```
+browser ──► web (Nginx :80) ──FastCGI──► app (PHP-FPM :9000) ──► SQLite (/data volume)
+```
+
+---
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/tests.yml`) runs on every push to `main`,
+on every pull request and nightly:
+
+1. **Tests** — the PHPUnit suite against a PHP 8.3 / 8.4 / 8.5 matrix.
+2. **Docker build + smoke test** — builds both images, starts the stack with
+   `docker compose`, and checks that `/up` and `/projects` respond.
+3. **Publish** — on `main` only, pushes the images to GitHub Container Registry
+   (`ghcr.io/besirii/mini-issue-tracker` and `…-web`), tagged with the commit SHA
+   and `latest`.
+
+Actions are pinned to commit SHAs, the workflow token is read-only by default,
+and Dependabot keeps the pinned actions up to date.
+
+---
+
 ## How the AJAX pieces work
 
 - `public/js/app.js` — a tiny Fetch wrapper that attaches the CSRF token and the
